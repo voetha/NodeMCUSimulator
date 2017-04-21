@@ -1,5 +1,6 @@
 package com.crygier.nodemcu.emu;
 
+import com.crygier.nodemcu.Emulation;
 import org.luaj.vm2.LuaClosure;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -8,22 +9,25 @@ import org.luaj.vm2.lib.TwoArgFunction;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.Optional;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-import static com.crygier.nodemcu.util.LuaFunctionUtil.oneArgConsumer;
-import static com.crygier.nodemcu.util.LuaFunctionUtil.varargsFunction;
+import static com.crygier.nodemcu.util.LuaFunctionUtil.*;
 
 public class Timers extends TwoArgFunction {
-
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-
     public static final Integer ALARM_SINGLE                = 0;
     public static final Integer ALARM_SEMI                  = 1;
     public static final Integer ALARM_AUTO                  = 2;
 
     private Map<Integer, RunningTimer> timers = new HashMap<>();
+    private Map<LuaTable, RunningTimer> timerObjects = new HashMap<>();
+
+    private final Emulation emulation;
+
+    public Timers(Emulation emulation) {
+        this.emulation = emulation;
+    }
 
     @Override
     public LuaValue call(LuaValue modname, LuaValue env) {
@@ -32,8 +36,10 @@ public class Timers extends TwoArgFunction {
         // Methods
         timers.set("alarm", varargsFunction(this::alarm));
         timers.set("register", varargsFunction(this::register));
-        timers.set("unregister", oneArgConsumer(this::register));
-        timers.set("start", oneArgConsumer(this::register));
+        timers.set("unregister", oneArgConsumer(this::unregister));
+        timers.set("start", oneArgConsumer(this::start));
+        timers.set("stop", oneArgConsumer(this::stop));
+        timers.set("create", zeroArgFunction(this::create));
 
         // Constants
         timers.set("ALARM_SINGLE", ALARM_SINGLE);
@@ -51,63 +57,117 @@ public class Timers extends TwoArgFunction {
         start(varargs.arg1());
     }
 
+    private LuaTable create() {
+        LuaTable timer = new LuaTable();
+        timerObjects.computeIfAbsent(timer, RunningTimer::new);
+
+        timer.set("alarm", varargsFunction(this::alarm));
+        timer.set("register", varargsFunction(this::register));
+        timer.set("unregister", oneArgConsumer(this::unregister));
+        timer.set("start", oneArgConsumer(this::start));
+        timer.set("stop", oneArgConsumer(this::stop));
+
+        return timer;
+    }
+
     private void register(Varargs varargs) {
-        Integer id = varargs.arg(1).toint();
+        Optional<RunningTimer> timer = byLuaValue(varargs.arg(1), true);
         Long intervalMs = varargs.arg(2).tolong();
         Integer mode = varargs.arg(3).toint();
         LuaClosure callback = (LuaClosure) varargs.arg(4);
 
+        assert timer.isPresent() : "first argument must be either an id or a valid timer object";
         assert intervalMs > 0 : "Interval MUST be a positive integer";
         assert callback != null : "Callback MUST be provided";
 
-        RunningTimer timer = new RunningTimer();
-        timer.id = id;
-        timer.intervalMs = intervalMs;
-        timer.mode = mode;
-        timer.callback = callback;
-        timer.running = false;
-
-        timers.put(id, timer);
+        timer.ifPresent(t -> {
+            t.intervalMs = intervalMs;
+            t.mode = mode;
+            t.callback = callback;
+            t.running = false;
+        });
     }
 
     private void unregister(LuaValue id) {
-        assert timers.containsKey(id.toint()) : "Please register timer first";
-        timers.remove(id.toint());
+        Optional<RunningTimer> timer = byLuaValue(id, false);
+        assert timer.isPresent() : "Please register timer first";
+        timer.ifPresent(t -> {
+            stopTimer(t);
+            unregisterTimer(t);
+        });
+    }
+
+    private void stop(LuaValue id) {
+        Optional<RunningTimer> timer = byLuaValue(id, false);
+        assert timer.isPresent() : "Please register timer first";
+        timer.ifPresent(this::stopTimer);
     }
 
     private void start(LuaValue id) {
-        assert timers.containsKey(id.toint()) : "Please register timer first";
-        RunningTimer timerConfig = timers.get(id.toint());
+        Optional<RunningTimer> timer = byLuaValue(id, false);
+        assert timer.isPresent() : "Please register timer first";
+        timer.ifPresent(this::startTimer);
+    }
 
-        if (ALARM_SINGLE.equals(timerConfig.mode)) {
-            scheduler.schedule(() -> {
-                timerConfig.callback.call();
-                unregister(id);
-            }, timerConfig.intervalMs, TimeUnit.MILLISECONDS);
-        } else if (ALARM_SEMI.equals(timerConfig.mode)) {
-            scheduler.schedule(() -> {
-                timerConfig.callback.call();
-                timerConfig.running = false;
-            }, timerConfig.intervalMs, TimeUnit.MILLISECONDS);
+
+    private Optional<RunningTimer> byLuaValue(LuaValue value, boolean createIfNumber) {
+        if(value.isnumber()) {
+            if(createIfNumber) {
+                return Optional.of(timers.computeIfAbsent(value.toint(), RunningTimer::new));
+            } else {
+                return Optional.ofNullable(timers.get(value.toint()));
+            }
+        } else if(value.istable()) {
+            return Optional.ofNullable(timerObjects.get(value.checktable()));
         } else {
-            scheduler.scheduleAtFixedRate(() -> {
+            return Optional.empty();
+        }
+    }
+
+    private void startTimer(RunningTimer timer) {
+        if (ALARM_SINGLE.equals(timer.mode)) {
+            timer.future = emulation.luaThread.schedule(() -> {
+                timer.callback.call();
+                unregisterTimer(timer);
+            }, timer.intervalMs, TimeUnit.MILLISECONDS);
+        } else if (ALARM_SEMI.equals(timer.mode)) {
+            timer.future = emulation.luaThread.schedule(() -> {
+                timer.callback.call();
+                timer.running = false;
+            }, timer.intervalMs, TimeUnit.MILLISECONDS);
+        } else {
+            timer.future = emulation.luaThread.scheduleAtFixedRate(() -> {
                 try {
-                    timerConfig.callback.call();
+                    timer.callback.call();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-            }, timerConfig.intervalMs, timerConfig.intervalMs, TimeUnit.MILLISECONDS);
+            }, timer.intervalMs, timer.intervalMs, TimeUnit.MILLISECONDS);
         }
 
-        timerConfig.running = true;
+        timer.running = true;
+    }
+
+    private void unregisterTimer(RunningTimer timer) {
+        timers.remove(timer.key);
+        timerObjects.remove(timer.key);
+    }
+
+    private void stopTimer(RunningTimer timer) {
+        if(timer.future != null) timer.future.cancel(false);
     }
 
     private static class RunningTimer {
-        Integer id;
+        final Object key;
+
         Long intervalMs;
         Integer mode;
         LuaClosure callback;
         Boolean running;
-    }
+        ScheduledFuture<?> future;
 
+        public RunningTimer(Object key) {
+            this.key = key;
+        }
+    }
 }

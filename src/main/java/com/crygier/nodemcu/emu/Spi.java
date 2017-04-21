@@ -1,5 +1,6 @@
 package com.crygier.nodemcu.emu;
 
+import com.crygier.nodemcu.Emulation;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
 import org.luaj.vm2.Varargs;
@@ -14,6 +15,11 @@ import java.util.function.BiConsumer;
 import static com.crygier.nodemcu.util.LuaFunctionUtil.varargsFunction;
 
 public class Spi extends TwoArgFunction {
+    private final Emulation emulation;
+
+    public Spi(Emulation emulation) {
+        this.emulation = emulation;
+    }
 
     public static final Integer MASTER                      = 0;
     public static final Integer SLAVE                       = 1;

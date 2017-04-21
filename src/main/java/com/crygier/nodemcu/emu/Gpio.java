@@ -1,19 +1,21 @@
 package com.crygier.nodemcu.emu;
 
-import org.luaj.vm2.LuaClosure;
-import org.luaj.vm2.LuaTable;
-import org.luaj.vm2.LuaValue;
-import org.luaj.vm2.Varargs;
+import com.crygier.nodemcu.Emulation;
+import org.luaj.vm2.*;
 import org.luaj.vm2.lib.TwoArgFunction;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static com.crygier.nodemcu.util.LuaFunctionUtil.*;
 
 public class Gpio extends TwoArgFunction {
+    private final Emulation emulation;
+
+    public Gpio(Emulation emulation) {
+        this.emulation = emulation;
+    }
 
     public static final Integer OUTPUT                      = 0;
     public static final Integer INPUT                       = 1;
@@ -37,6 +39,7 @@ public class Gpio extends TwoArgFunction {
         gpio.set("read", oneArgFunction(this::read));
         gpio.set("trig", threeArgFunction(this::trig));
         gpio.set("write", twoArgFunction(this::write));
+        gpio.set("serout", varargsFunction(this::serout));
 
         // Constants
         gpio.set("OUTPUT", OUTPUT);
@@ -87,6 +90,10 @@ public class Gpio extends TwoArgFunction {
         pinState.trigCallback = callback;
     }
 
+    private void toggle(int pin) {
+        setPinValue(pin, 1 - getPinState(pin).level);
+    }
+
     private void write(LuaValue pin, LuaValue level) {
         setPinValue(pin.toint(), level.toint());
     }
@@ -98,6 +105,7 @@ public class Gpio extends TwoArgFunction {
         pinState.level = level;
 
         if (!Objects.equals(previousLevel, pinState.level)) {
+            System.out.println("pin " + pin + " changed from " + previousLevel + " to " + pinState.level);
             if (pinState.trigCallback != null) {
                 if (pinState.level == 0 && ("down".equals(pinState.trigType) || "both".equals(pinState.trigType) || "low".equals(pinState.trigType)))
                     pinState.trigCallback.call(LuaValue.valueOf(pinState.level));
@@ -107,6 +115,69 @@ public class Gpio extends TwoArgFunction {
 
             if (onChangeHandler != null)
                 onChangeHandler.accept(pinState);
+        }
+    }
+
+    private void seroutSync(int pin, int cycles, int[] delays) {
+        int delayIx = 0;
+        while(cycles > 0) {
+            try {
+                Thread.sleep(delays[delayIx] * 1000);
+                toggle(pin);
+
+                delayIx++;
+                if (delayIx == delays.length) {
+                    delayIx = 0;
+                    cycles--;
+                }
+            } catch (InterruptedException e) {
+                System.err.println("catched InterruptedException while sleeping in sync seroute");
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void seroutASyncCall(int pin, int delayIx, int cycles, int[] delays, LuaFunction callback) {
+        toggle(pin);
+        seroutASync(pin, delayIx, cycles, delays, callback);
+    }
+
+    private void seroutASync(int pin, int delayIx, int cycles, int[] delays, LuaFunction callback) {
+        if(cycles > 0 || (cycles == 0 && delayIx < delays.length-1)) {
+            emulation.luaThread.schedule(
+                    () -> seroutASyncCall(pin, (delayIx+1) % delays.length, cycles - (delayIx == delays.length-1 ? 1 : 0), delays, callback),
+                    delays[delayIx],
+                    TimeUnit.MICROSECONDS
+            );
+        } else if(callback != null) {
+            callback.call();
+        }
+    }
+
+    private void serout(Varargs args) {
+        LuaInteger pin = args.checkinteger(1);
+        LuaInteger startLevel = LuaInteger.valueOf(args.checkinteger(2).toint() == HIGH ? HIGH : LOW);
+        LuaTable delayTimes = args.checktable(3);
+        int cycleNum = args.optint(4, 1);
+        boolean async = !args.isnil(5);
+        LuaFunction callback = args.isfunction(5) ? args.checkfunction(5) : null;
+
+        ArrayList<Integer> delayList = new ArrayList<>();
+        int i = 1; // lua starts arrays at index 1
+        LuaValue v;
+        while((v = delayTimes.get(i++)) != LuaValue.NIL) {
+            delayList.add(v.toint());
+        }
+        int[] delays = new int[delayList.size()];
+        for(i = 0; i < delayList.size(); i++) {
+            delays[i] = delayList.get(i);
+        }
+
+        write(pin, startLevel);
+        if(async) {
+            seroutASync(pin.toint(), 0, cycleNum, delays, callback);
+        } else {
+            seroutSync(pin.toint(), cycleNum, delays);
         }
     }
 

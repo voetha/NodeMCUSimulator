@@ -1,5 +1,6 @@
 package com.crygier.nodemcu.emu;
 
+import com.crygier.nodemcu.Emulation;
 import org.luaj.vm2.LuaString;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -11,6 +12,11 @@ import java.util.function.Consumer;
 import static com.crygier.nodemcu.util.LuaFunctionUtil.varargsFunction;
 
 public class Apa102 extends TwoArgFunction {
+    private final Emulation emulation;
+
+    public Apa102(Emulation emulation) {
+        this.emulation = emulation;
+    }
 
     public static final Integer MASTER                      = 0;
     public static final Integer SLAVE                       = 1;

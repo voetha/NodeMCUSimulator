@@ -1,5 +1,6 @@
 package com.crygier.nodemcu.emu;
 
+import com.crygier.nodemcu.Emulation;
 import com.crygier.nodemcu.emu.http.HttpRequest;
 import org.luaj.vm2.LuaClosure;
 import org.luaj.vm2.LuaTable;
@@ -12,6 +13,11 @@ import java.util.Arrays;
 import static com.crygier.nodemcu.util.LuaFunctionUtil.*;
 
 public class Http extends TwoArgFunction {
+    private final Emulation emulation;
+
+    public Http(Emulation emulation) {
+        this.emulation = emulation;
+    }
 
     @Override
     public LuaValue call(LuaValue modname, LuaValue env) {
