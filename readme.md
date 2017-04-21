@@ -11,21 +11,38 @@ it will never be 100% correct, but this project aims to get close.
 Please, if anyone is interested, help is definitely welcome to make this more complete.  
 
 
-Running
--------
+## Running
 
+The simulator can be run directly or using docker.
+
+### Directly
 To run, simply build and execute the Main class. The first and only argument needs to be the path to the lua file you 
 wish to execute. When using gradle to run the program use "-Pexecargs=..." to supply arguments. For example:
 
-    ./gradlew run -Pexecargs="./init.lua"
+    $ ./gradlew run -Pexecargs="./init.lua"
     
 You can overwrite configuration values on the command line. When using gradle to run the program you need to preprend 
 "exec." to the values. If you wish to override, e.g., "node.chipid" you would need to use the following command:
 
-    ./gradlew run -Pexecargs="./init.lua" -Dexec.node.chipid=12345
+    $ ./gradlew run -Pexecargs="./init.lua" -Dexec.node.chipid=12345
 
-A sample blink program has been included (in 'init.lua').
+A sample blink program has been included (in 'lua/init.lua').
 
+### Docker
+
+Using gradle the simulator can be packed as docker image. In this case the lua program to be simulated needs to be part of the image. By default the contents of the "lua" directory is added to the docker image at path "/node-mcu-simulator/lua". To dcreate the image use the "distDocker" command:
+
+    $ ./gradlew distDocker
+    
+To run the package use docker run:
+
+    $ docker run docker -it com.crygier.nodemcu/node-mcu-simulator /node-mcu-simulator/lua/init.lua
+    
+If you want to run multiple instances with different chipid's without repacking the image fpr each run you can set the "CHIPID" environment variable for each run:
+
+    $ docker run docker -e CHIPID=12345 -it com.crygier.nodemcu/node-mcu-simulator /node-mcu-simulator/lua/init.lua
+
+---
 
 The following API's have some / all work done:
 

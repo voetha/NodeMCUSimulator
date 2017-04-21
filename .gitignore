@@ -1,6 +1,5 @@
 .idea/
 *.iml
-lua/*
 build/
 classes/
 .gradle/

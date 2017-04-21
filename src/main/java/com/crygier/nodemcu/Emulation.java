@@ -1,6 +1,7 @@
 package com.crygier.nodemcu;
 
 import com.crygier.nodemcu.emu.*;
+import com.crygier.nodemcu.util.ConfigUtil;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import org.luaj.vm2.Globals;
@@ -15,7 +16,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 public class Emulation {
     public final ScheduledExecutorService luaThread = Executors.newScheduledThreadPool(1);
-    public final Config config = ConfigFactory.load();
+    public final Config config = ConfigUtil.withFallback(ConfigFactory.load(), "env");
 
     public final Node node = new Node(this);
     public final Http http = new Http(this);

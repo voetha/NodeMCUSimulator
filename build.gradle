@@ -1,7 +1,15 @@
 apply plugin: 'java'
-apply plugin:'application'
+apply plugin: 'application'
+apply plugin: 'docker'
 
 mainClassName = "com.crygier.nodemcu.Main"
+
+buildscript {
+    repositories { jcenter() }
+    dependencies {
+        classpath 'se.transmode.gradle:gradle-docker:1.2'
+    }
+}
 
 repositories {
     mavenCentral()
@@ -27,4 +35,14 @@ run {
     if (project.hasProperty('execargs')) {
         args(execargs.split(' '))
     }
+}
+
+group = 'com.crygier.nodemcu'
+
+docker {
+    applicationName = 'node-mcu-simulator'
+}
+
+distDocker {
+    addFile "lua", "/node-mcu-simulator/lua"
 }
