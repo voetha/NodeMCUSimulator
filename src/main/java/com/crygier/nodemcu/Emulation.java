@@ -11,11 +11,10 @@ import org.luaj.vm2.lib.jse.JsePlatform;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 public class Emulation {
-    public final ScheduledExecutorService luaThread = Executors.newScheduledThreadPool(1);
+    public final ScheduledExecutorService luaThread = new LuaExecutor();
     public final Config config = ConfigUtil.withFallback(ConfigFactory.load(), "env");
 
     public final Node node = new Node(this);
@@ -58,3 +57,4 @@ public class Emulation {
         });
     }
 }
+
